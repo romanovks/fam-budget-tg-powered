@@ -39,10 +39,9 @@ class BudgetOpenAIClient:
         current_date: str,
         default_account: str,
     ) -> ParseResult:
-        schema = ParseResult.model_json_schema()
-        response = self._client.responses.create(
+        completion = self._client.chat.completions.parse(
             model=self._settings.openai_parse_model,
-            input=[
+            messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
                     "role": "user",
@@ -57,16 +56,12 @@ class BudgetOpenAIClient:
                     ),
                 },
             ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "ParseResult",
-                    "schema": schema,
-                    "strict": True,
-                }
-            },
+            response_format=ParseResult,
         )
-        return ParseResult.model_validate_json(response.output_text)
+        parsed = completion.choices[0].message.parsed
+        if parsed is None:
+            raise ValueError("OpenAI parser returned no structured result")
+        return parsed
 
     def parse_image(
         self,
@@ -78,11 +73,10 @@ class BudgetOpenAIClient:
         current_date: str,
         default_account: str,
     ) -> ParseResult:
-        schema = ParseResult.model_json_schema()
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
-        response = self._client.responses.create(
+        completion = self._client.chat.completions.parse(
             model=self._settings.openai_vision_model,
-            input=[
+            messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
                     "role": "user",
@@ -107,16 +101,12 @@ class BudgetOpenAIClient:
                     ],
                 },
             ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "ParseResult",
-                    "schema": schema,
-                    "strict": True,
-                }
-            },
+            response_format=ParseResult,
         )
-        return ParseResult.model_validate_json(response.output_text)
+        parsed = completion.choices[0].message.parsed
+        if parsed is None:
+            raise ValueError("OpenAI parser returned no structured result")
+        return parsed
 
     def transcribe_audio(self, audio_path: Path) -> str:
         with audio_path.open("rb") as audio_file:
