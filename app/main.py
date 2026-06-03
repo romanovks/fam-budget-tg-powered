@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from openai import OpenAIError
 
 from app.audio import convert_telegram_voice_to_mp3
 from app.config import Settings, get_settings
@@ -72,8 +73,23 @@ async def telegram_webhook(
         )
         await telegram.send_message(chat_id, response_text)
     except Exception as exc:
-        await telegram.send_message(chat_id, f"Не смог обработать сообщение. Ошибка: {exc}")
+        await telegram.send_message(chat_id, user_facing_error(exc))
     return {"ok": True}
+
+
+def user_facing_error(exc: Exception) -> str:
+    message = str(exc)
+    if isinstance(exc, OpenAIError) or "insufficient_quota" in message:
+        return (
+            "Не смог обработать сообщение: у OpenAI API key нет доступной квоты или не включён billing. "
+            "Проверь OpenAI Platform -> Billing и лимиты проекта, потом повтори сообщение."
+        )
+    if "PERMISSION_DENIED" in message or "403" in message:
+        return (
+            "Не смог записать в Google Sheet: похоже, у service account нет доступа. "
+            "Проверь, что таблица расшарена на service account с правами Editor."
+        )
+    return f"Не смог обработать сообщение. Ошибка: {message[:300]}"
 
 
 async def parse_message(
