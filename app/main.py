@@ -55,6 +55,12 @@ async def telegram_webhook(
         return {"ok": True}
 
     try:
+        if message.get("text", "").startswith("/start"):
+            await telegram.send_message(
+                chat_id,
+                "Я готов вести семейный бюджет. Пиши расходы текстом, голосом или присылай фото чека.",
+            )
+            return {"ok": True}
         text, parse_result = await parse_message(message, telegram, settings, processor, person)
         transactions = await processor.normalize(parse_result, person)
         response_text = processor.write_and_summarize(

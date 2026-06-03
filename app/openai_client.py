@@ -39,7 +39,7 @@ class BudgetOpenAIClient:
         current_date: str,
         default_account: str,
     ) -> ParseResult:
-        completion = self._client.chat.completions.parse(
+        completion = self._client.chat.completions.create(
             model=self._settings.openai_parse_model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -56,12 +56,12 @@ class BudgetOpenAIClient:
                     ),
                 },
             ],
-            response_format=ParseResult,
+            response_format={"type": "json_object"},
         )
-        parsed = completion.choices[0].message.parsed
-        if parsed is None:
+        content = completion.choices[0].message.content
+        if not content:
             raise ValueError("OpenAI parser returned no structured result")
-        return parsed
+        return ParseResult.model_validate_json(content)
 
     def parse_image(
         self,
@@ -74,7 +74,7 @@ class BudgetOpenAIClient:
         default_account: str,
     ) -> ParseResult:
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
-        completion = self._client.chat.completions.parse(
+        completion = self._client.chat.completions.create(
             model=self._settings.openai_vision_model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -101,12 +101,12 @@ class BudgetOpenAIClient:
                     ],
                 },
             ],
-            response_format=ParseResult,
+            response_format={"type": "json_object"},
         )
-        parsed = completion.choices[0].message.parsed
-        if parsed is None:
+        content = completion.choices[0].message.content
+        if not content:
             raise ValueError("OpenAI parser returned no structured result")
-        return parsed
+        return ParseResult.model_validate_json(content)
 
     def transcribe_audio(self, audio_path: Path) -> str:
         with audio_path.open("rb") as audio_file:
