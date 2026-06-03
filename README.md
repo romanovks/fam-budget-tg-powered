@@ -144,6 +144,56 @@ uvicorn app.main:app --reload --port 8080
 
 Use Cloud Run with `min instances = 0` for near-free webhook hosting.
 
+### Deploy with gcloud
+
+Set local shell variables. Do not commit these values:
+
+```bash
+export PROJECT_ID="your-google-cloud-project-id"
+export REGION="europe-west1"
+export SERVICE="fam-budget-tg-powered"
+export SERVICE_ACCOUNT_EMAIL="tg-fin-helper@project-af60215d-0436-4b7f-b01.iam.gserviceaccount.com"
+export SPREADSHEET_ID="12l-A4RKoQ6ZybkQt1k08LIx3mxJPuMDoiFbBx4SQp7U"
+```
+
+Enable APIs:
+
+```bash
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com sheets.googleapis.com --project "$PROJECT_ID"
+```
+
+Create secrets. Paste the secret values when prompted:
+
+```bash
+printf %s "PASTE_NEW_TELEGRAM_BOT_TOKEN" | gcloud secrets create telegram-bot-token --data-file=- --project "$PROJECT_ID"
+printf %s "PASTE_NEW_OPENAI_API_KEY" | gcloud secrets create openai-api-key --data-file=- --project "$PROJECT_ID"
+printf %s "PASTE_WEBHOOK_SECRET" | gcloud secrets create telegram-webhook-secret --data-file=- --project "$PROJECT_ID"
+```
+
+Allow the Cloud Run service account to read these secrets:
+
+```bash
+gcloud secrets add-iam-policy-binding telegram-bot-token --member "serviceAccount:$SERVICE_ACCOUNT_EMAIL" --role "roles/secretmanager.secretAccessor" --project "$PROJECT_ID"
+gcloud secrets add-iam-policy-binding openai-api-key --member "serviceAccount:$SERVICE_ACCOUNT_EMAIL" --role "roles/secretmanager.secretAccessor" --project "$PROJECT_ID"
+gcloud secrets add-iam-policy-binding telegram-webhook-secret --member "serviceAccount:$SERVICE_ACCOUNT_EMAIL" --role "roles/secretmanager.secretAccessor" --project "$PROJECT_ID"
+```
+
+Deploy from the repo root:
+
+```bash
+gcloud run deploy "$SERVICE" \
+  --source . \
+  --project "$PROJECT_ID" \
+  --region "$REGION" \
+  --service-account "$SERVICE_ACCOUNT_EMAIL" \
+  --allow-unauthenticated \
+  --min-instances 0 \
+  --max-instances 1 \
+  --memory 512Mi \
+  --set-env-vars "SPREADSHEET_ID=$SPREADSHEET_ID,KONSTANTIN_TELEGRAM_ID=433497646,SVITLANA_TELEGRAM_ID=409566099,TIMEZONE=Europe/Warsaw,DEFAULT_ACCOUNT_KONSTANTIN=Family Card,DEFAULT_ACCOUNT_SVITLANA=Svitlana Card" \
+  --set-secrets "TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,OPENAI_API_KEY=openai-api-key:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest"
+```
+
 After deployment, set the Telegram webhook:
 
 ```bash
