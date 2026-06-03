@@ -22,7 +22,14 @@ Spreadsheet rules:
 - Use Family for shared household expenses. Use Konstantin Personal or Svitlana Personal for clearly personal expenses.
 - For sport/gym/MultiSport/lab sport tests for Konstantin, use Konstantin Personal.
 - Default dates should use the provided current_date.
-- Return JSON only.
+- Return JSON only, with exactly this top-level shape:
+  {"raw_language":"ru|uk|pl|en|unknown","summary":"short summary","transactions":[...]}
+- Every transaction must include: date, person, type, category, subcategory, amount, currency, account,
+  payment_owner, family_personal, merchant, description, confidence, review_status, notes.
+- Currency must be one of these ISO codes only: PLN, USD, EUR, GBP, UAH. Never return "zloty",
+  "злотый", "гривна", "$", "zl", or "zł".
+- review_status must be either OK or Needs Review.
+- confidence must be High, Medium, or Low.
 """.strip()
 
 
@@ -61,7 +68,13 @@ class BudgetOpenAIClient:
         content = completion.choices[0].message.content
         if not content:
             raise ValueError("OpenAI parser returned no structured result")
-        return ParseResult.model_validate_json(content)
+        return self._parse_result(
+            content=content,
+            current_date=current_date,
+            person=person,
+            default_account=default_account,
+            original_text=text,
+        )
 
     def parse_image(
         self,
@@ -106,7 +119,13 @@ class BudgetOpenAIClient:
         content = completion.choices[0].message.content
         if not content:
             raise ValueError("OpenAI parser returned no structured result")
-        return ParseResult.model_validate_json(content)
+        return self._parse_result(
+            content=content,
+            current_date=current_date,
+            person=person,
+            default_account=default_account,
+            original_text=caption or "photo receipt",
+        )
 
     def transcribe_audio(self, audio_path: Path) -> str:
         with audio_path.open("rb") as audio_file:
@@ -116,3 +135,118 @@ class BudgetOpenAIClient:
                 response_format="text",
             )
         return str(transcription)
+
+    def _parse_result(
+        self,
+        *,
+        content: str,
+        current_date: str,
+        person: Person,
+        default_account: str,
+        original_text: str,
+    ) -> ParseResult:
+        payload = json.loads(content)
+        payload.setdefault("raw_language", "unknown")
+        payload.setdefault("summary", original_text[:160] or "Parsed Telegram message")
+        payload["transactions"] = [
+            self._coerce_transaction(
+                tx,
+                current_date=current_date,
+                person=person,
+                default_account=default_account,
+                original_text=original_text,
+            )
+            for tx in payload.get("transactions", [])
+        ]
+        return ParseResult.model_validate(payload)
+
+    def _coerce_transaction(
+        self,
+        tx: dict,
+        *,
+        current_date: str,
+        person: Person,
+        default_account: str,
+        original_text: str,
+    ) -> dict:
+        tx = dict(tx)
+        tx["date"] = tx.get("date") or current_date
+        tx["person"] = tx.get("person") or person.value
+        tx["type"] = self._coerce_type(tx.get("type"))
+        tx["category"] = tx.get("category") or "Other"
+        tx["subcategory"] = tx.get("subcategory") or "Uncategorized"
+        tx["currency"] = self._coerce_currency(tx.get("currency"))
+        tx["account"] = tx.get("account") or default_account
+        tx["payment_owner"] = tx.get("payment_owner") or person.value
+        tx["family_personal"] = tx.get("family_personal") or "Family"
+        tx["merchant"] = tx.get("merchant") or tx.get("vendor") or "Unknown"
+        tx["description"] = tx.get("description") or original_text[:200] or tx["merchant"]
+        tx["confidence"] = self._coerce_confidence(tx.get("confidence"), tx.get("flags"))
+        tx["review_status"] = self._coerce_review_status(tx.get("review_status"), tx.get("flags"))
+        tx["notes"] = tx.get("notes") or ""
+        return tx
+
+    def _coerce_currency(self, value) -> str:
+        normalized = str(value or "PLN").strip().lower()
+        mapping = {
+            "pln": "PLN",
+            "zl": "PLN",
+            "zł": "PLN",
+            "zloty": "PLN",
+            "zlotych": "PLN",
+            "злотый": "PLN",
+            "злотых": "PLN",
+            "злоті": "PLN",
+            "злотих": "PLN",
+            "usd": "USD",
+            "$": "USD",
+            "dollar": "USD",
+            "dollars": "USD",
+            "доллар": "USD",
+            "долларов": "USD",
+            "eur": "EUR",
+            "€": "EUR",
+            "euro": "EUR",
+            "евро": "EUR",
+            "gbp": "GBP",
+            "£": "GBP",
+            "uah": "UAH",
+            "грн": "UAH",
+            "гривна": "UAH",
+            "гривен": "UAH",
+            "гривень": "UAH",
+        }
+        return mapping.get(normalized, "PLN")
+
+    def _coerce_type(self, value) -> str:
+        normalized = str(value or "Expense").strip().lower()
+        mapping = {
+            "expense": "Expense",
+            "расход": "Expense",
+            "витрата": "Expense",
+            "income": "Income",
+            "доход": "Income",
+            "надходження": "Income",
+            "transfer": "Transfer",
+            "refund": "Refund",
+            "adjustment": "Adjustment",
+        }
+        return mapping.get(normalized, "Expense")
+
+    def _coerce_confidence(self, value, flags) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized in {"high", "medium", "low"}:
+            return normalized.title()
+        if flags:
+            return "Medium"
+        return "High"
+
+    def _coerce_review_status(self, value, flags) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized in {"ok", "corrected", "ignored"}:
+            return "OK" if normalized == "ok" else "Needs Review"
+        if normalized == "needs review":
+            return "Needs Review"
+        if flags and "Needs Review" in flags:
+            return "Needs Review"
+        return "OK"
