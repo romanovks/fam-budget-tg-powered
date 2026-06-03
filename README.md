@@ -60,16 +60,15 @@ Send it in this form:
 OPENAI_API_KEY=sk-...
 ```
 
-### 4. Google service account JSON
+### 4. Google service account
 
 1. Go to Google Cloud Console.
 2. Create or select a project.
 3. Enable Google Sheets API.
 4. Go to IAM & Admin -> Service Accounts.
 5. Create a service account.
-6. Open it -> Keys -> Add key -> Create new key -> JSON.
-7. Download the JSON file.
-8. Share the Google Sheet with the service account email, usually like:
+6. Do not create a JSON key if your organization blocks keys.
+7. Share the Google Sheet with the service account email, usually like:
 
 ```text
 something@project-id.iam.gserviceaccount.com
@@ -77,7 +76,15 @@ something@project-id.iam.gserviceaccount.com
 
 Give it Editor access.
 
-For local `.env`, the JSON can be pasted as one line or base64 encoded. Safer form:
+On Cloud Run, attach this service account to the service. The app will use Application Default Credentials automatically, so `GOOGLE_SERVICE_ACCOUNT_JSON` is not needed.
+
+For local development only, either run:
+
+```bash
+gcloud auth application-default login
+```
+
+or, if your organization allows keys, paste JSON as one line or base64 encode it. Safer key form:
 
 ```bash
 base64 -i /path/to/service-account.json
@@ -111,6 +118,7 @@ Create `.env` locally:
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_WEBHOOK_SECRET=
 OPENAI_API_KEY=
+# Optional. Leave empty on Cloud Run or when using gcloud auth application-default login.
 GOOGLE_SERVICE_ACCOUNT_JSON=
 SPREADSHEET_ID=12l-A4RKoQ6ZybkQt1k08LIx3mxJPuMDoiFbBx4SQp7U
 KONSTANTIN_TELEGRAM_ID=

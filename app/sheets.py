@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import google.auth
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
@@ -13,12 +14,18 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 
 class SheetsClient:
-    def __init__(self, service_account_json: str, spreadsheet_id: str, timezone: str) -> None:
+    def __init__(self, service_account_json: str | None, spreadsheet_id: str, timezone: str) -> None:
         self._spreadsheet_id = spreadsheet_id
         self._timezone = timezone
-        service_info = self._parse_service_account_json(service_account_json)
-        credentials = Credentials.from_service_account_info(service_info, scopes=SCOPES)
+        credentials = self._credentials(service_account_json)
         self._service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+
+    def _credentials(self, service_account_json: str | None):
+        if service_account_json:
+            service_info = self._parse_service_account_json(service_account_json)
+            return Credentials.from_service_account_info(service_info, scopes=SCOPES)
+        credentials, _ = google.auth.default(scopes=SCOPES)
+        return credentials
 
     def _parse_service_account_json(self, value: str) -> dict:
         stripped = value.strip()
