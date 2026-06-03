@@ -62,6 +62,9 @@ async def telegram_webhook(
                 "Я готов вести семейный бюджет. Пиши расходы текстом, голосом или присылай фото чека.",
             )
             return {"ok": True}
+        if is_test_message(message.get("text", "")):
+            await telegram.send_message(chat_id, "Тест принят: бот отвечает, в таблицу ничего не записал.")
+            return {"ok": True}
         text, parse_result = await parse_message(message, telegram, settings, processor, person)
         transactions = await processor.normalize(parse_result, person)
         response_text = processor.write_and_summarize(
@@ -90,6 +93,11 @@ def user_facing_error(exc: Exception) -> str:
             "Проверь, что таблица расшарена на service account с правами Editor."
         )
     return f"Не смог обработать сообщение. Ошибка: {message[:300]}"
+
+
+def is_test_message(text: str) -> bool:
+    normalized = text.strip().lower()
+    return normalized == "test" or normalized == "тест" or normalized.startswith("test ") or normalized.startswith("тест ")
 
 
 async def parse_message(
