@@ -17,6 +17,17 @@ Telegram chat
   -> Dashboard balance back to Telegram
 ```
 
+## Bot Commands
+
+Recommended BotFather commands:
+
+```text
+start - проверить, что бот жив и готов записывать расходы
+budget - показать текущий бюджет и баланс
+```
+
+The same budget summary also works with plain messages like `покажи текущий бюджет`, `покажи баланс`, or `поточний бюджет`.
+
 ## What I Need From You
 
 ### 1. Telegram bot token

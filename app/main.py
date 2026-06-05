@@ -51,6 +51,10 @@ async def telegram_webhook(
         await telegram.send_message(chat_id, "Я знаю только Konstantin и Svitlana. Добавь этот Telegram user id в настройки.")
         return {"ok": True}
 
+    if is_budget_request(message.get("text", "")):
+        await telegram.send_message(chat_id, processor.current_budget_summary())
+        return {"ok": True}
+
     if processor.already_processed(update_id):
         await telegram.send_message(chat_id, "Это сообщение уже обработано, пропускаю дубль.")
         return {"ok": True}
@@ -59,7 +63,7 @@ async def telegram_webhook(
         if message.get("text", "").startswith("/start"):
             await telegram.send_message(
                 chat_id,
-                "Я готов вести семейный бюджет. Пиши расходы текстом, голосом или присылай фото чека.",
+                "Я готов вести семейный бюджет. Пиши расходы текстом, голосом или присылай фото чека. /budget покажет текущий бюджет.",
             )
             return {"ok": True}
         if is_test_message(message.get("text", "")):
@@ -98,6 +102,25 @@ def user_facing_error(exc: Exception) -> str:
 def is_test_message(text: str) -> bool:
     normalized = text.strip().lower()
     return normalized == "test" or normalized == "тест" or normalized.startswith("test ") or normalized.startswith("тест ")
+
+
+def is_budget_request(text: str) -> bool:
+    normalized = text.strip().lower()
+    return normalized in {
+        "/budget",
+        "/balance",
+        "budget",
+        "balance",
+        "баланс",
+        "покажи баланс",
+        "покажи бюджет",
+        "покажи текущий бюджет",
+        "текущий бюджет",
+        "текущий семейный бюджет",
+        "поточний бюджет",
+        "покажи поточний бюджет",
+        "покажи поточний баланс",
+    }
 
 
 async def parse_message(

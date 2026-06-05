@@ -110,6 +110,20 @@ class BudgetProcessor:
             lines.append(f"Баланс: {dashboard['Net Savings']} PLN")
         return "\n".join(lines)
 
+    def current_budget_summary(self) -> str:
+        dashboard = self._sheets.read_dashboard()
+        income = dashboard.get("Total Income", "n/a")
+        expenses = dashboard.get("Total Expenses", "n/a")
+        balance = dashboard.get("Net Savings", "n/a")
+        return "\n".join(
+            [
+                "Текущий бюджет:",
+                f"Доходы: {income} PLN",
+                f"Расходы: {expenses} PLN",
+                f"Баланс: {balance} PLN",
+            ]
+        )
+
     def already_processed(self, update_id: int) -> bool:
         return self._sheets.already_processed(update_id)
 
