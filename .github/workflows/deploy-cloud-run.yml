@@ -1,0 +1,83 @@
+name: Deploy Cloud Run
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: cloud-run-production
+  cancel-in-progress: true
+
+env:
+  PROJECT_ID: project-af60215d-0436-4b7f-b01
+  PROJECT_NUMBER: "702807059402"
+  REGION: europe-west1
+  SERVICE: fam-budget-tg-powered
+  RUNTIME_SERVICE_ACCOUNT: tg-fin-helper@project-af60215d-0436-4b7f-b01.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/702807059402/locations/global/workloadIdentityPools/github-actions/providers/github-actions
+  DEPLOYER_SERVICE_ACCOUNT: github-actions-deployer@project-af60215d-0436-4b7f-b01.iam.gserviceaccount.com
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: test
+    environment: production
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          service: ${{ env.SERVICE }}
+          region: ${{ env.REGION }}
+          source: .
+          env_vars: |-
+            SPREADSHEET_ID=12l-A4RKoQ6ZybkQt1k08LIx3mxJPuMDoiFbBx4SQp7U
+            KONSTANTIN_TELEGRAM_ID=433497646
+            SVITLANA_TELEGRAM_ID=409566099
+            TIMEZONE=Europe/Warsaw
+            DEFAULT_ACCOUNT_KONSTANTIN=Family Card
+            DEFAULT_ACCOUNT_SVITLANA=Svitlana Card
+          secrets: |-
+            TELEGRAM_BOT_TOKEN=telegram-bot-token:latest
+            OPENAI_API_KEY=openai-api-key:latest
+            TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest
+          flags: |-
+            --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
+            --min-instances=0
+            --max-instances=1
+            --memory=512Mi

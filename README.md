@@ -217,6 +217,116 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   }'
 ```
 
+## Automatic Deploys from GitHub Actions
+
+The repo includes `.github/workflows/deploy-cloud-run.yml`. Every push to `master` runs tests and deploys the bot to Cloud Run.
+
+GitHub does not store Telegram or OpenAI secrets. Those stay in Google Secret Manager. GitHub Actions authenticates to Google Cloud through Workload Identity Federation.
+
+### One-time GCP setup
+
+Run this once in Cloud Shell:
+
+```bash
+export PROJECT_ID="project-af60215d-0436-4b7f-b01"
+export PROJECT_NUMBER="702807059402"
+export REGION="europe-west1"
+export REPO="romanovks/fam-budget-tg-powered"
+export POOL_ID="github-actions"
+export PROVIDER_ID="github-actions"
+export DEPLOYER_SA_NAME="github-actions-deployer"
+export DEPLOYER_SA="$DEPLOYER_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
+export RUNTIME_SA="tg-fin-helper@$PROJECT_ID.iam.gserviceaccount.com"
+```
+
+Enable APIs:
+
+```bash
+gcloud services enable \
+  run.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com \
+  secretmanager.googleapis.com \
+  iamcredentials.googleapis.com \
+  sts.googleapis.com \
+  --project "$PROJECT_ID"
+```
+
+Create a deployer service account:
+
+```bash
+gcloud iam service-accounts create "$DEPLOYER_SA_NAME" \
+  --project "$PROJECT_ID" \
+  --display-name "GitHub Actions Cloud Run deployer"
+```
+
+Grant deploy permissions:
+
+```bash
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member "serviceAccount:$DEPLOYER_SA" \
+  --role "roles/run.admin"
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member "serviceAccount:$DEPLOYER_SA" \
+  --role "roles/cloudbuild.builds.editor"
+
+gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
+  --project "$PROJECT_ID" \
+  --member "serviceAccount:$DEPLOYER_SA" \
+  --role "roles/iam.serviceAccountUser"
+```
+
+Allow the deployer to reference the existing Secret Manager secrets during deploy:
+
+```bash
+for SECRET in telegram-bot-token openai-api-key telegram-webhook-secret; do
+  gcloud secrets add-iam-policy-binding "$SECRET" \
+    --project "$PROJECT_ID" \
+    --member "serviceAccount:$DEPLOYER_SA" \
+    --role "roles/secretmanager.secretAccessor"
+done
+```
+
+Create the GitHub OIDC pool and provider:
+
+```bash
+gcloud iam workload-identity-pools create "$POOL_ID" \
+  --project "$PROJECT_ID" \
+  --location "global" \
+  --display-name "GitHub Actions"
+
+gcloud iam workload-identity-pools providers create-oidc "$PROVIDER_ID" \
+  --project "$PROJECT_ID" \
+  --location "global" \
+  --workload-identity-pool "$POOL_ID" \
+  --display-name "GitHub Actions provider" \
+  --issuer-uri "https://token.actions.githubusercontent.com" \
+  --attribute-mapping "google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
+  --attribute-condition "assertion.repository == '$REPO' && assertion.ref == 'refs/heads/master'"
+```
+
+Allow only this GitHub repo to impersonate the deployer service account:
+
+```bash
+gcloud iam service-accounts add-iam-policy-binding "$DEPLOYER_SA" \
+  --project "$PROJECT_ID" \
+  --role "roles/iam.workloadIdentityUser" \
+  --member "principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL_ID/attribute.repository/$REPO"
+```
+
+Expected provider value used by the workflow:
+
+```text
+projects/702807059402/locations/global/workloadIdentityPools/github-actions/providers/github-actions
+```
+
+After this setup, pushing to `master` is enough:
+
+```bash
+git push origin HEAD:master
+```
+
 ## Notes
 
 - The bot writes the original message to `Raw Input` first.
