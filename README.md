@@ -271,6 +271,10 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member "serviceAccount:$DEPLOYER_SA" \
   --role "roles/cloudbuild.builds.editor"
 
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member "serviceAccount:$DEPLOYER_SA" \
+  --role "roles/artifactregistry.admin"
+
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
   --project "$PROJECT_ID" \
   --member "serviceAccount:$DEPLOYER_SA" \
