@@ -255,6 +255,7 @@ export PROVIDER_ID="github-actions"
 export DEPLOYER_SA_NAME="github-actions-deployer"
 export DEPLOYER_SA="$DEPLOYER_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
 export RUNTIME_SA="tg-fin-helper@$PROJECT_ID.iam.gserviceaccount.com"
+export BUILD_SA="$PROJECT_NUMBER-compute@developer.gserviceaccount.com"
 ```
 
 Enable APIs:
@@ -298,6 +299,11 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --role "roles/storage.admin"
 
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
+  --project "$PROJECT_ID" \
+  --member "serviceAccount:$DEPLOYER_SA" \
+  --role "roles/iam.serviceAccountUser"
+
+gcloud iam service-accounts add-iam-policy-binding "$BUILD_SA" \
   --project "$PROJECT_ID" \
   --member "serviceAccount:$DEPLOYER_SA" \
   --role "roles/iam.serviceAccountUser"
