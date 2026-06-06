@@ -76,6 +76,7 @@ jobs:
             TELEGRAM_BOT_TOKEN=telegram-bot-token:latest
             OPENAI_API_KEY=openai-api-key:latest
             TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest
+            TASKS_SECRET=tasks-secret:latest
           flags: |-
             --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
             --min-instances=0

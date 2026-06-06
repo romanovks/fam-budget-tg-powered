@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN")
     telegram_webhook_secret: str = Field(alias="TELEGRAM_WEBHOOK_SECRET")
+    tasks_secret: str | None = Field(default=None, alias="TASKS_SECRET")
     openai_api_key: str = Field(alias="OPENAI_API_KEY")
     google_service_account_json: str | None = Field(default=None, alias="GOOGLE_SERVICE_ACCOUNT_JSON")
     spreadsheet_id: str = Field(alias="SPREADSHEET_ID")

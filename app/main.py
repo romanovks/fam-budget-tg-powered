@@ -27,6 +27,25 @@ async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.post("/tasks/digest/{period}")
+async def scheduled_digest(
+    period: str,
+    x_tasks_secret: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+    processor: BudgetProcessor = Depends(get_processor),
+) -> dict[str, bool]:
+    if not settings.tasks_secret or x_tasks_secret != settings.tasks_secret:
+        raise HTTPException(status_code=401, detail="Invalid tasks secret")
+    if period not in {"weekly", "monthly"}:
+        raise HTTPException(status_code=404, detail="Unknown digest period")
+
+    telegram = TelegramClient(settings.telegram_bot_token)
+    report_period = "week" if period == "weekly" else "month"
+    text = processor.report_summary(report_period, previous=True)
+    await send_to_recipients(telegram, processor, text)
+    return {"ok": True}
+
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(
     request: Request,
@@ -55,6 +74,14 @@ async def telegram_webhook(
         await telegram.send_message(chat_id, processor.current_budget_summary())
         return {"ok": True}
 
+    if report_period := report_request_period(message.get("text", "")):
+        await telegram.send_message(chat_id, processor.report_summary(report_period, previous=False))
+        return {"ok": True}
+
+    if limit_response := processor.handle_limit_text(message.get("text", ""), person):
+        await telegram.send_message(chat_id, limit_response)
+        return {"ok": True}
+
     if processor.already_processed(update_id):
         await telegram.send_message(chat_id, "Это сообщение уже обработано, пропускаю дубль.")
         return {"ok": True}
@@ -79,6 +106,8 @@ async def telegram_webhook(
             transactions=transactions,
         )
         await telegram.send_message(chat_id, response_text)
+        for alert in processor.limit_alerts():
+            await send_to_recipients(telegram, processor, alert)
     except Exception as exc:
         await telegram.send_message(chat_id, user_facing_error(exc))
     return {"ok": True}
@@ -121,6 +150,25 @@ def is_budget_request(text: str) -> bool:
         "покажи поточний бюджет",
         "покажи поточний баланс",
     }
+
+
+def report_request_period(text: str) -> str | None:
+    normalized = text.strip().lower()
+    if normalized in {"/week", "week", "покажи неделю", "отчет за неделю", "звіт за тиждень"}:
+        return "week"
+    if normalized in {"/month", "month", "покажи месяц", "отчет за месяц", "звіт за місяць"}:
+        return "month"
+    if "отчет" in normalized or "звіт" in normalized or "репорт" in normalized:
+        if "недел" in normalized or "тиж" in normalized:
+            return "week"
+        if "месяц" in normalized or "міся" in normalized:
+            return "month"
+    return None
+
+
+async def send_to_recipients(telegram: TelegramClient, processor: BudgetProcessor, text: str) -> None:
+    for chat_id in processor.recipient_chat_ids():
+        await telegram.send_message(chat_id, text)
 
 
 async def parse_message(

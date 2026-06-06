@@ -24,9 +24,24 @@ Recommended BotFather commands:
 ```text
 start - проверить, что бот жив и готов записывать расходы
 budget - показать текущий бюджет и баланс
+week - показать отчет за текущую неделю
+month - показать отчет за текущий месяц
+limits - показать активные лимиты и алерты
 ```
 
 The same budget summary also works with plain messages like `покажи текущий бюджет`, `покажи баланс`, or `поточний бюджет`.
+
+Useful commands:
+
+```text
+/week
+/month
+/limit продукты 2500 PLN month
+/limit спорт 600 PLN week
+/limits
+/delete_limit продукты
+/alert balance below 10000 PLN
+```
 
 ## What I Need From You
 
@@ -128,6 +143,7 @@ Create `.env` locally:
 ```text
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_WEBHOOK_SECRET=
+TASKS_SECRET=
 OPENAI_API_KEY=
 # Optional. Leave empty on Cloud Run or when using gcloud auth application-default login.
 GOOGLE_SERVICE_ACCOUNT_JSON=
@@ -179,6 +195,7 @@ Create secrets. Paste the secret values when prompted:
 printf %s "PASTE_NEW_TELEGRAM_BOT_TOKEN" | gcloud secrets create telegram-bot-token --data-file=- --project "$PROJECT_ID"
 printf %s "PASTE_NEW_OPENAI_API_KEY" | gcloud secrets create openai-api-key --data-file=- --project "$PROJECT_ID"
 printf %s "PASTE_WEBHOOK_SECRET" | gcloud secrets create telegram-webhook-secret --data-file=- --project "$PROJECT_ID"
+openssl rand -hex 32 | gcloud secrets create tasks-secret --data-file=- --project "$PROJECT_ID"
 ```
 
 Allow the Cloud Run service account to read these secrets:
@@ -187,6 +204,7 @@ Allow the Cloud Run service account to read these secrets:
 gcloud secrets add-iam-policy-binding telegram-bot-token --member "serviceAccount:$SERVICE_ACCOUNT_EMAIL" --role "roles/secretmanager.secretAccessor" --project "$PROJECT_ID"
 gcloud secrets add-iam-policy-binding openai-api-key --member "serviceAccount:$SERVICE_ACCOUNT_EMAIL" --role "roles/secretmanager.secretAccessor" --project "$PROJECT_ID"
 gcloud secrets add-iam-policy-binding telegram-webhook-secret --member "serviceAccount:$SERVICE_ACCOUNT_EMAIL" --role "roles/secretmanager.secretAccessor" --project "$PROJECT_ID"
+gcloud secrets add-iam-policy-binding tasks-secret --member "serviceAccount:$SERVICE_ACCOUNT_EMAIL" --role "roles/secretmanager.secretAccessor" --project "$PROJECT_ID"
 ```
 
 Deploy from the repo root:
@@ -202,7 +220,7 @@ gcloud run deploy "$SERVICE" \
   --max-instances 1 \
   --memory 512Mi \
   --set-env-vars "SPREADSHEET_ID=$SPREADSHEET_ID,KONSTANTIN_TELEGRAM_ID=433497646,SVITLANA_TELEGRAM_ID=409566099,TIMEZONE=Europe/Warsaw,DEFAULT_ACCOUNT_KONSTANTIN=Family Card,DEFAULT_ACCOUNT_SVITLANA=Svitlana Card" \
-  --set-secrets "TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,OPENAI_API_KEY=openai-api-key:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest"
+  --set-secrets "TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,OPENAI_API_KEY=openai-api-key:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,TASKS_SECRET=tasks-secret:latest"
 ```
 
 After deployment, set the Telegram webhook:
@@ -275,6 +293,10 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member "serviceAccount:$DEPLOYER_SA" \
   --role "roles/artifactregistry.admin"
 
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member "serviceAccount:$DEPLOYER_SA" \
+  --role "roles/storage.admin"
+
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
   --project "$PROJECT_ID" \
   --member "serviceAccount:$DEPLOYER_SA" \
@@ -284,7 +306,7 @@ gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
 Allow the deployer to reference the existing Secret Manager secrets during deploy:
 
 ```bash
-for SECRET in telegram-bot-token openai-api-key telegram-webhook-secret; do
+for SECRET in telegram-bot-token openai-api-key telegram-webhook-secret tasks-secret; do
   gcloud secrets add-iam-policy-binding "$SECRET" \
     --project "$PROJECT_ID" \
     --member "serviceAccount:$DEPLOYER_SA" \
@@ -324,6 +346,12 @@ Expected provider value used by the workflow:
 ```text
 projects/702807059402/locations/global/workloadIdentityPools/github-actions/providers/github-actions
 ```
+
+The repo also includes `.github/workflows/scheduled-digests.yml`:
+
+- every Monday at `06:00 UTC`, it asks the bot to send the previous-week digest to both private Telegram chats
+- every first day of the month at `06:10 UTC`, it asks the bot to send the previous-month digest to both private Telegram chats
+- manual runs are available from GitHub Actions with `weekly` or `monthly`
 
 After this setup, pushing to `master` is enough:
 

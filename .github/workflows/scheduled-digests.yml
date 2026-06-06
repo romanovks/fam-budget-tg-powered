@@ -1,0 +1,68 @@
+name: Scheduled Digests
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+    - cron: "10 6 1 * *"
+  workflow_dispatch:
+    inputs:
+      period:
+        description: Digest period
+        required: true
+        default: weekly
+        type: choice
+        options:
+          - weekly
+          - monthly
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: project-af60215d-0436-4b7f-b01
+  REGION: europe-west1
+  SERVICE: fam-budget-tg-powered
+  WORKLOAD_IDENTITY_PROVIDER: projects/702807059402/locations/global/workloadIdentityPools/github-actions/providers/github-actions
+  DEPLOYER_SERVICE_ACCOUNT: github-actions-deployer@project-af60215d-0436-4b7f-b01.iam.gserviceaccount.com
+
+jobs:
+  weekly:
+    name: Weekly Digest
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 6 * * 1' || github.event.inputs.period == 'weekly'
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Call weekly digest task
+        run: |
+          TASKS_SECRET="$(gcloud secrets versions access latest --secret=tasks-secret --project="$PROJECT_ID")"
+          SERVICE_URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')"
+          curl -fsS -X POST -H "X-Tasks-Secret: $TASKS_SECRET" "$SERVICE_URL/tasks/digest/weekly"
+
+  monthly:
+    name: Monthly Digest
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '10 6 1 * *' || github.event.inputs.period == 'monthly'
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Call monthly digest task
+        run: |
+          TASKS_SECRET="$(gcloud secrets versions access latest --secret=tasks-secret --project="$PROJECT_ID")"
+          SERVICE_URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')"
+          curl -fsS -X POST -H "X-Tasks-Secret: $TASKS_SECRET" "$SERVICE_URL/tasks/digest/monthly"
