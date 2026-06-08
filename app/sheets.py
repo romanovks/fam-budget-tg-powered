@@ -363,18 +363,19 @@ class SheetsClient:
     ) -> None:
         generated_at = datetime.now(ZoneInfo(self._timezone)).strftime("%Y-%m-%d %H:%M:%S %Z")
         rows = [
-            ["Last Digest", generated_at],
-            ["Digest Period", period],
-            ["Digest Range", title],
-            ["Digest Expenses PLN", round(total_expenses, 2)],
-            ["Digest Income PLN", round(total_income, 2)],
-            ["Digest Net PLN", round(total_income - total_expenses, 2)],
-            ["Current Balance PLN", current_balance],
+            ["Last Digest", ""],
+            ["Generated At", generated_at],
+            ["Period", period],
+            ["Range", title],
+            ["Expenses PLN", round(total_expenses, 2)],
+            ["Income PLN", round(total_income, 2)],
+            ["Net PLN", round(total_income - total_expenses, 2)],
+            ["Current Balance PLN", "=B6" if current_balance else ""],
             ["Top Category 1", _format_top_category(top_categories, 0)],
             ["Top Category 2", _format_top_category(top_categories, 1)],
             ["Top Category 3", _format_top_category(top_categories, 2)],
         ]
-        self._update_values("Dashboard!G4:H13", rows)
+        self._update_values("Dashboard!G3:H13", rows)
 
     def ensure_limits_sheet(self) -> None:
         self._ensure_sheet(LIMITS_SHEET, LIMITS_HEADERS)
