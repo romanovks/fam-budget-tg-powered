@@ -46,7 +46,7 @@ async def scheduled_digest(
 
     telegram = TelegramClient(settings.telegram_bot_token)
     report_period = "week" if period == "weekly" else "month"
-    text = processor.report_summary(report_period, previous=True)
+    text = processor.report_summary(report_period, previous=True, write_to_sheet=True)
     await send_to_recipients(telegram, processor, text)
     return {"ok": True}
 
@@ -80,7 +80,7 @@ async def telegram_webhook(
         return {"ok": True}
 
     if report_period := report_request_period(message.get("text", "")):
-        await telegram.send_message(chat_id, processor.report_summary(report_period, previous=False))
+        await telegram.send_message(chat_id, processor.report_summary(report_period, previous=False, write_to_sheet=True))
         return {"ok": True}
 
     if limit_response := processor.handle_limit_text(message.get("text", ""), person):

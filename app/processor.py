@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import Settings
 from app.currency import NbpClient
-from app.models import Currency, NormalizedTransaction, ParseResult, Person, ReviewStatus
+from app.models import Confidence, Currency, NormalizedTransaction, ParseResult, Person, ReviewStatus
 from app.openai_client import BudgetOpenAIClient
 from app.sheets import BudgetLimit, SheetsClient, SheetTransaction
 from app.taxonomy import normalize_account, normalize_category
@@ -95,7 +95,13 @@ class BudgetProcessor:
     async def normalize(self, parse_result: ParseResult, person: Person) -> list[NormalizedTransaction]:
         normalized = []
         for tx in parse_result.transactions:
-            category, subcategory, category_changed = normalize_category(tx.type, tx.category, tx.subcategory)
+            category, subcategory, category_changed = normalize_category(
+                tx.type,
+                tx.category,
+                tx.subcategory,
+                merchant=tx.merchant,
+                description=tx.description,
+            )
             account, account_changed = normalize_account(tx.account, self.default_account(person))
             rate = await self._nbp.get_rate(tx.currency, tx.date)
             notes = tx.notes
@@ -112,19 +118,33 @@ class BudgetProcessor:
                 ).strip()
             if category_changed:
                 notes = f"{notes} Category normalized from {tx.category} / {tx.subcategory}.".strip()
-                tx.review_status = ReviewStatus.NEEDS_REVIEW
             if account_changed:
                 notes = f"{notes} Account normalized from {tx.account} to {account}.".strip()
-                tx.review_status = ReviewStatus.NEEDS_REVIEW
+            review_status = self._final_review_status(tx.confidence, category, subcategory)
 
             normalized.append(
                 NormalizedTransaction(
-                    **tx.model_dump(exclude={"amount", "currency", "category", "subcategory", "account", "notes"}),
+                    **tx.model_dump(
+                        exclude={
+                            "person",
+                            "amount",
+                            "currency",
+                            "category",
+                            "subcategory",
+                            "account",
+                            "payment_owner",
+                            "review_status",
+                            "notes",
+                        }
+                    ),
+                    person=person,
                     amount=amount_pln,
                     currency=Currency.PLN,
                     category=category,
                     subcategory=subcategory,
                     account=account,
+                    payment_owner=person.value,
+                    review_status=review_status,
                     notes=notes,
                     original_amount=tx.amount,
                     original_currency=tx.currency,
@@ -155,7 +175,8 @@ class BudgetProcessor:
         dashboard = self._sheets.read_dashboard()
         lines = [f"Внесено: {len(transactions)} транзакц."]
         for tx in transactions:
-            lines.append(f"- {tx.merchant}: {tx.amount:,.2f} PLN, {tx.category} / {tx.subcategory}")
+            merchant = tx.merchant if tx.merchant != "Unknown" else tx.description
+            lines.append(f"- {merchant}: {tx.amount:,.2f} PLN, {tx.category} / {tx.subcategory}")
         if dashboard.get("Net Savings"):
             lines.append(f"Баланс: {dashboard['Net Savings']} PLN")
         return "\n".join(lines)
@@ -175,7 +196,7 @@ class BudgetProcessor:
                 alerts.append(message)
         return alerts
 
-    def report_summary(self, period: str, *, previous: bool = False) -> str:
+    def report_summary(self, period: str, *, previous: bool = False, write_to_sheet: bool = False) -> str:
         start, end, title = self._period_bounds(period, previous=previous)
         transactions = [
             tx for tx in self._sheets.read_transactions()
@@ -213,7 +234,21 @@ class BudgetProcessor:
             lines.append("")
             lines.append("Лимиты:")
             lines.extend(limit_lines)
-        return "\n".join(lines)
+        report_text = "\n".join(lines)
+        if write_to_sheet:
+            self._write_report_to_sheet(
+                period=period,
+                start=start,
+                end=end,
+                title=title,
+                total_expenses=total_expenses,
+                total_income=total_income,
+                current_balance=dashboard.get("Net Savings", ""),
+                top_categories=top_categories,
+                limit_lines=limit_lines,
+                report_text=report_text,
+            )
+        return report_text
 
     def handle_limit_text(self, text: str, person: Person) -> str | None:
         normalized = text.strip()
@@ -326,6 +361,49 @@ class BudgetProcessor:
 
     def recipient_chat_ids(self) -> list[int]:
         return [self._settings.konstantin_telegram_id, self._settings.svitlana_telegram_id]
+
+    def _final_review_status(self, confidence: Confidence, category: str, subcategory: str) -> ReviewStatus:
+        if confidence == Confidence.LOW:
+            return ReviewStatus.NEEDS_REVIEW
+        if category == "Other" and subcategory == "Uncategorized":
+            return ReviewStatus.NEEDS_REVIEW
+        return ReviewStatus.OK
+
+    def _write_report_to_sheet(
+        self,
+        *,
+        period: str,
+        start: date,
+        end: date,
+        title: str,
+        total_expenses: float,
+        total_income: float,
+        current_balance: str,
+        top_categories: list[tuple[str, float]],
+        limit_lines: list[str],
+        report_text: str,
+    ) -> None:
+        period_name = "Weekly" if period in {"week", "weekly"} else "Monthly"
+        self._sheets.upsert_period_report(
+            period=period_name,
+            start=start,
+            end=end,
+            title=title,
+            total_expenses=total_expenses,
+            total_income=total_income,
+            current_balance=current_balance,
+            top_categories=top_categories,
+            limit_lines=limit_lines,
+            report_text=report_text,
+        )
+        self._sheets.update_digest_dashboard(
+            period=period_name,
+            title=title,
+            total_expenses=total_expenses,
+            total_income=total_income,
+            current_balance=current_balance,
+            top_categories=top_categories,
+        )
 
     def _category_limit_alert(self, limit: BudgetLimit, transactions: list[SheetTransaction]) -> str | None:
         start, end, title = self._period_bounds(limit.period.lower(), previous=False)

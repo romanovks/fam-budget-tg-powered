@@ -14,6 +14,8 @@ from app.models import NormalizedTransaction, ParseResult, Person
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 LIMITS_SHEET = "Limits"
+WEEKLY_REPORTS_SHEET = "Weekly Reports"
+MONTHLY_REPORTS_SHEET = "Monthly Reports"
 LIMITS_HEADERS = [
     "Limit ID",
     "Scope",
@@ -28,6 +30,19 @@ LIMITS_HEADERS = [
     "Created At",
     "Last Alert Key",
     "Description",
+]
+REPORT_HEADERS = [
+    "Generated At",
+    "Period",
+    "Start Date",
+    "End Date",
+    "Total Expenses PLN",
+    "Total Income PLN",
+    "Net PLN",
+    "Current Balance PLN",
+    "Top Categories",
+    "Limits",
+    "Digest",
 ]
 
 
@@ -222,30 +237,108 @@ class SheetsClient:
     def update_limit_alert_key(self, row_number: int, alert_key: str) -> None:
         self._update_values(f"{LIMITS_SHEET}!L{row_number}", [[alert_key]])
 
+    def upsert_period_report(
+        self,
+        *,
+        period: str,
+        start: date,
+        end: date,
+        title: str,
+        total_expenses: float,
+        total_income: float,
+        current_balance: str,
+        top_categories: list[tuple[str, float]],
+        limit_lines: list[str],
+        report_text: str,
+    ) -> None:
+        sheet_name = WEEKLY_REPORTS_SHEET if period == "Weekly" else MONTHLY_REPORTS_SHEET
+        self._ensure_sheet(sheet_name, REPORT_HEADERS)
+        generated_at = datetime.now(ZoneInfo(self._timezone)).strftime("%Y-%m-%d %H:%M:%S %Z")
+        row = [
+            generated_at,
+            title,
+            start.isoformat(),
+            end.isoformat(),
+            round(total_expenses, 2),
+            round(total_income, 2),
+            round(total_income - total_expenses, 2),
+            current_balance,
+            "\n".join(f"{category}: {amount:,.2f} PLN" for category, amount in top_categories),
+            "\n".join(limit_lines),
+            report_text,
+        ]
+        values = (
+            self._service.spreadsheets()
+            .values()
+            .get(spreadsheetId=self._spreadsheet_id, range=f"{sheet_name}!A:K")
+            .execute()
+            .get("values", [])
+        )
+        target_row = None
+        for index, existing in enumerate(values[1:], start=2):
+            existing_start = existing[2] if len(existing) > 2 else ""
+            existing_end = existing[3] if len(existing) > 3 else ""
+            if existing_start == start.isoformat() and existing_end == end.isoformat():
+                target_row = index
+                break
+        if target_row:
+            self._update_values(f"{sheet_name}!A{target_row}:K{target_row}", [row])
+        else:
+            self._append_values(f"{sheet_name}!A:K", [row])
+
+    def update_digest_dashboard(
+        self,
+        *,
+        period: str,
+        title: str,
+        total_expenses: float,
+        total_income: float,
+        current_balance: str,
+        top_categories: list[tuple[str, float]],
+    ) -> None:
+        generated_at = datetime.now(ZoneInfo(self._timezone)).strftime("%Y-%m-%d %H:%M:%S %Z")
+        rows = [
+            ["Last Digest", generated_at],
+            ["Digest Period", period],
+            ["Digest Range", title],
+            ["Digest Expenses PLN", round(total_expenses, 2)],
+            ["Digest Income PLN", round(total_income, 2)],
+            ["Digest Net PLN", round(total_income - total_expenses, 2)],
+            ["Current Balance PLN", current_balance],
+            ["Top Category 1", _format_top_category(top_categories, 0)],
+            ["Top Category 2", _format_top_category(top_categories, 1)],
+            ["Top Category 3", _format_top_category(top_categories, 2)],
+        ]
+        self._update_values("Dashboard!D4:E13", rows)
+
     def ensure_limits_sheet(self) -> None:
+        self._ensure_sheet(LIMITS_SHEET, LIMITS_HEADERS)
+
+    def _ensure_sheet(self, sheet_name: str, headers: list[str]) -> None:
         spreadsheet = (
             self._service.spreadsheets()
             .get(spreadsheetId=self._spreadsheet_id, fields="sheets.properties.title")
             .execute()
         )
         titles = {sheet["properties"]["title"] for sheet in spreadsheet.get("sheets", [])}
-        if LIMITS_SHEET not in titles:
+        if sheet_name not in titles:
             self._service.spreadsheets().batchUpdate(
                 spreadsheetId=self._spreadsheet_id,
-                body={"requests": [{"addSheet": {"properties": {"title": LIMITS_SHEET}}}]},
+                body={"requests": [{"addSheet": {"properties": {"title": sheet_name}}}]},
             ).execute()
-            self._update_values(f"{LIMITS_SHEET}!A1:M1", [LIMITS_HEADERS])
+            if headers:
+                self._update_values(f"{sheet_name}!A1:{_column_name(len(headers))}1", [headers])
             return
 
         values = (
             self._service.spreadsheets()
             .values()
-            .get(spreadsheetId=self._spreadsheet_id, range=f"{LIMITS_SHEET}!A1:M1")
+            .get(spreadsheetId=self._spreadsheet_id, range=f"{sheet_name}!A1:{_column_name(len(headers))}1")
             .execute()
             .get("values", [])
         )
-        if not values:
-            self._update_values(f"{LIMITS_SHEET}!A1:M1", [LIMITS_HEADERS])
+        if headers and not values:
+            self._update_values(f"{sheet_name}!A1:{_column_name(len(headers))}1", [headers])
 
     def _parse_transaction_row(self, row: list[str]) -> SheetTransaction | None:
         if len(row) < 9 or row[0] == "Transaction ID":
@@ -320,3 +413,18 @@ class SheetsClient:
             valueInputOption="USER_ENTERED",
             body={"values": rows},
         ).execute()
+
+
+def _column_name(index: int) -> str:
+    name = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def _format_top_category(top_categories: list[tuple[str, float]], index: int) -> str:
+    if index >= len(top_categories):
+        return ""
+    category, amount = top_categories[index]
+    return f"{category}: {amount:,.2f} PLN"

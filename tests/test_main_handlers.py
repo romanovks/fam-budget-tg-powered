@@ -27,10 +27,10 @@ class PartiallyFailingTelegramClient(FakeTelegramClient):
 
 class FakeDigestProcessor:
     def __init__(self) -> None:
-        self.report_calls: list[tuple[str, bool]] = []
+        self.report_calls: list[tuple[str, bool, bool]] = []
 
-    def report_summary(self, period: str, *, previous: bool = False) -> str:
-        self.report_calls.append((period, previous))
+    def report_summary(self, period: str, *, previous: bool = False, write_to_sheet: bool = False) -> str:
+        self.report_calls.append((period, previous, write_to_sheet))
         return f"{period} report"
 
     def recipient_chat_ids(self) -> list[int]:
@@ -91,7 +91,7 @@ def test_scheduled_digest_sends_previous_week_report_to_both_recipients(monkeypa
     )
 
     assert result == {"ok": True}
-    assert processor.report_calls == [("week", True)]
+    assert processor.report_calls == [("week", True, True)]
     assert FakeTelegramClient.messages == [(101, "week report"), (202, "week report")]
 
 
@@ -111,7 +111,7 @@ def test_scheduled_digest_tolerates_secret_trailing_newline(monkeypatch: pytest.
     )
 
     assert result == {"ok": True}
-    assert processor.report_calls == [("week", True)]
+    assert processor.report_calls == [("week", True, True)]
 
 
 def test_scheduled_digest_rejects_wrong_secret(monkeypatch: pytest.MonkeyPatch) -> None:

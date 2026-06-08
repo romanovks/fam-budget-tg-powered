@@ -1,8 +1,10 @@
+import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from app.models import Person
+from app.currency import Rate
+from app.models import Currency, ParseResult, ParsedTransaction, Person
 from app.processor import BudgetProcessor
 from app.sheets import BudgetLimit, SheetTransaction
 
@@ -21,6 +23,8 @@ class FakeSheetsClient:
         self.created_limits = []
         self.alert_keys = []
         self.deactivated_rows = []
+        self.period_reports = []
+        self.dashboard_updates = []
 
     def read_transactions(self):
         return self.transactions
@@ -40,6 +44,17 @@ class FakeSheetsClient:
     def deactivate_limit(self, row_number):
         self.deactivated_rows.append(row_number)
 
+    def upsert_period_report(self, **kwargs):
+        self.period_reports.append(kwargs)
+
+    def update_digest_dashboard(self, **kwargs):
+        self.dashboard_updates.append(kwargs)
+
+
+class FakeNbpClient:
+    async def get_rate(self, currency, date):
+        return Rate(currency=currency, pln=1.0, effective_date=date, table="PLN")
+
 
 def make_processor(fake_sheets: FakeSheetsClient) -> BudgetProcessor:
     return BudgetProcessor(
@@ -52,7 +67,7 @@ def make_processor(fake_sheets: FakeSheetsClient) -> BudgetProcessor:
         ),
         openai_client=SimpleNamespace(),
         sheets_client=fake_sheets,
-        nbp_client=SimpleNamespace(),
+        nbp_client=FakeNbpClient(),
     )
 
 
@@ -64,6 +79,52 @@ def test_report_summary_includes_totals_and_top_categories() -> None:
     assert "Расходы: 200.00 PLN" in report
     assert "Доходы: 1,000.00 PLN" in report
     assert "1. Groceries: 120.00 PLN" in report
+
+
+def test_report_summary_writes_report_and_dashboard() -> None:
+    fake_sheets = FakeSheetsClient()
+    processor = make_processor(fake_sheets)
+
+    report = processor.report_summary("month", write_to_sheet=True)
+
+    assert "Отчет:" in report
+    assert fake_sheets.period_reports[0]["period"] == "Monthly"
+    assert fake_sheets.period_reports[0]["total_expenses"] == 200.0
+    assert fake_sheets.dashboard_updates[0]["period"] == "Monthly"
+
+
+def test_normalize_uses_sender_owner_and_ok_for_inferred_category() -> None:
+    processor = make_processor(FakeSheetsClient())
+    parsed = ParseResult(
+        raw_language="ru",
+        summary="электроэнергия",
+        transactions=[
+            ParsedTransaction(
+                date=processor.current_date(),
+                person=Person.SVITLANA,
+                type="Expense",
+                category="Other",
+                subcategory="Uncategorized",
+                amount=490,
+                currency=Currency.PLN,
+                account="Unknown Account",
+                payment_owner="Svitlana",
+                family_personal="Family",
+                merchant="Unknown",
+                description="Оплата электроэнергии коммуналка 490 злотых",
+                confidence="High",
+                review_status="Needs Review",
+            )
+        ],
+    )
+
+    normalized = asyncio.run(processor.normalize(parsed, Person.KONSTANTIN))
+
+    assert normalized[0].person == Person.KONSTANTIN
+    assert normalized[0].payment_owner == "Konstantin"
+    assert normalized[0].category == "Housing"
+    assert normalized[0].subcategory == "Electricity"
+    assert normalized[0].review_status == "OK"
 
 
 def test_category_limit_command_creates_monthly_limit() -> None:
