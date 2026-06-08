@@ -20,3 +20,9 @@ def test_scheduled_digest_crons_match_job_conditions() -> None:
     assert "github.event.schedule == '27 6 1 * *'" in workflow
     assert "github.event.schedule == '0 6 * * 1'" not in workflow
     assert "github.event.schedule == '10 6 1 * *'" not in workflow
+
+
+def test_scheduled_digest_strips_secret_newlines_before_header() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "scheduled-digests.yml").read_text()
+
+    assert "tr -d '\\r\\n'" in workflow

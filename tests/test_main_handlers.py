@@ -95,6 +95,25 @@ def test_scheduled_digest_sends_previous_week_report_to_both_recipients(monkeypa
     assert FakeTelegramClient.messages == [(101, "week report"), (202, "week report")]
 
 
+def test_scheduled_digest_tolerates_secret_trailing_newline(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeTelegramClient.messages = []
+    monkeypatch.setattr("app.main.TelegramClient", FakeTelegramClient)
+    processor = FakeDigestProcessor()
+    settings = SimpleNamespace(tasks_secret="tasks-secret\n", telegram_bot_token="telegram-token")
+
+    result = asyncio.run(
+        scheduled_digest(
+            "weekly",
+            x_tasks_secret="tasks-secret",
+            settings=settings,
+            processor=processor,
+        )
+    )
+
+    assert result == {"ok": True}
+    assert processor.report_calls == [("week", True)]
+
+
 def test_scheduled_digest_rejects_wrong_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.main.TelegramClient", FakeTelegramClient)
     settings = SimpleNamespace(tasks_secret="tasks-secret", telegram_bot_token="telegram-token")

@@ -37,7 +37,9 @@ async def scheduled_digest(
     settings: Settings = Depends(get_settings),
     processor: BudgetProcessor = Depends(get_processor),
 ) -> dict[str, bool]:
-    if not settings.tasks_secret or x_tasks_secret != settings.tasks_secret:
+    expected_tasks_secret = settings.tasks_secret.strip() if settings.tasks_secret else ""
+    actual_tasks_secret = x_tasks_secret.strip() if x_tasks_secret else ""
+    if not expected_tasks_secret or actual_tasks_secret != expected_tasks_secret:
         raise HTTPException(status_code=401, detail="Invalid tasks secret")
     if period not in {"weekly", "monthly"}:
         raise HTTPException(status_code=404, detail="Unknown digest period")

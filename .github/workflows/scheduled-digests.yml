@@ -43,9 +43,12 @@ jobs:
 
       - name: Call weekly digest task
         run: |
-          TASKS_SECRET="$(gcloud secrets versions access latest --secret=tasks-secret --project="$PROJECT_ID")"
+          TASKS_SECRET="$(gcloud secrets versions access latest --secret=tasks-secret --project="$PROJECT_ID" | tr -d '\r\n')"
           SERVICE_URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')"
-          curl -fsS -X POST -H "X-Tasks-Secret: $TASKS_SECRET" "$SERVICE_URL/tasks/digest/weekly"
+          response="$(mktemp)"
+          status="$(curl -sS -o "$response" -w "%{http_code}" -X POST -H "X-Tasks-Secret: $TASKS_SECRET" "$SERVICE_URL/tasks/digest/weekly")"
+          cat "$response"
+          test "$status" -ge 200 -a "$status" -lt 300
 
   monthly:
     name: Monthly Digest
@@ -63,6 +66,9 @@ jobs:
 
       - name: Call monthly digest task
         run: |
-          TASKS_SECRET="$(gcloud secrets versions access latest --secret=tasks-secret --project="$PROJECT_ID")"
+          TASKS_SECRET="$(gcloud secrets versions access latest --secret=tasks-secret --project="$PROJECT_ID" | tr -d '\r\n')"
           SERVICE_URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')"
-          curl -fsS -X POST -H "X-Tasks-Secret: $TASKS_SECRET" "$SERVICE_URL/tasks/digest/monthly"
+          response="$(mktemp)"
+          status="$(curl -sS -o "$response" -w "%{http_code}" -X POST -H "X-Tasks-Secret: $TASKS_SECRET" "$SERVICE_URL/tasks/digest/monthly")"
+          cat "$response"
+          test "$status" -ge 200 -a "$status" -lt 300
