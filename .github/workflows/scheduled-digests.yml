@@ -30,7 +30,7 @@ jobs:
   weekly:
     name: Weekly Digest
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 6 * * 1' || github.event.inputs.period == 'weekly'
+    if: github.event.schedule == '17 6 * * 1' || github.event.inputs.period == 'weekly'
     steps:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
@@ -50,7 +50,7 @@ jobs:
   monthly:
     name: Monthly Digest
     runs-on: ubuntu-latest
-    if: github.event.schedule == '10 6 1 * *' || github.event.inputs.period == 'monthly'
+    if: github.event.schedule == '27 6 1 * *' || github.event.inputs.period == 'monthly'
     steps:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
