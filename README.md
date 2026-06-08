@@ -335,7 +335,7 @@ gcloud iam workload-identity-pools providers create-oidc "$PROVIDER_ID" \
   --display-name "GitHub Actions provider" \
   --issuer-uri "https://token.actions.githubusercontent.com" \
   --attribute-mapping "google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
-  --attribute-condition "assertion.repository == '$REPO' && assertion.ref == 'refs/heads/master'"
+  --attribute-condition "assertion.repository == '$REPO' && assertion.ref == 'refs/heads/main'"
 ```
 
 Allow only this GitHub repo to impersonate the deployer service account:
@@ -355,14 +355,16 @@ projects/702807059402/locations/global/workloadIdentityPools/github-actions/prov
 
 The repo also includes `.github/workflows/scheduled-digests.yml`:
 
-- every Monday at `06:00 UTC`, it asks the bot to send the previous-week digest to both private Telegram chats
-- every first day of the month at `06:10 UTC`, it asks the bot to send the previous-month digest to both private Telegram chats
+- every Monday at `06:17 UTC`, it asks the bot to send the previous-week digest to both private Telegram chats
+- every first day of the month at `06:27 UTC`, it asks the bot to send the previous-month digest to both private Telegram chats
 - manual runs are available from GitHub Actions with `weekly` or `monthly`
 
-After this setup, pushing to `master` is enough:
+GitHub scheduled workflows are less reliable exactly at the top of the hour, so these jobs intentionally avoid minute `0`.
+
+After this setup, pushing to `main` is enough:
 
 ```bash
-git push origin HEAD:master
+git push origin HEAD:main
 ```
 
 ## Notes
