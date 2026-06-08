@@ -18,6 +18,13 @@ class FakeTelegramClient:
         self.messages.append((chat_id, text))
 
 
+class PartiallyFailingTelegramClient(FakeTelegramClient):
+    async def send_message(self, chat_id: int, text: str) -> None:
+        if chat_id == 202:
+            raise RuntimeError("bot was blocked by the user")
+        await super().send_message(chat_id, text)
+
+
 class FakeDigestProcessor:
     def __init__(self) -> None:
         self.report_calls: list[tuple[str, bool]] = []
@@ -103,6 +110,24 @@ def test_scheduled_digest_rejects_wrong_secret(monkeypatch: pytest.MonkeyPatch) 
         )
 
     assert exc.value.status_code == 401
+
+
+def test_scheduled_digest_continues_when_one_recipient_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    PartiallyFailingTelegramClient.messages = []
+    monkeypatch.setattr("app.main.TelegramClient", PartiallyFailingTelegramClient)
+    settings = SimpleNamespace(tasks_secret="tasks-secret", telegram_bot_token="telegram-token")
+
+    result = asyncio.run(
+        scheduled_digest(
+            "weekly",
+            x_tasks_secret="tasks-secret",
+            settings=settings,
+            processor=FakeDigestProcessor(),
+        )
+    )
+
+    assert result == {"ok": True}
+    assert PartiallyFailingTelegramClient.messages == [(101, "week report")]
 
 
 def test_webhook_sends_transaction_summary_and_limit_alerts_to_recipients(monkeypatch: pytest.MonkeyPatch) -> None:

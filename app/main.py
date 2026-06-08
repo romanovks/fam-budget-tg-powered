@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from openai import OpenAIError
 
@@ -11,6 +13,7 @@ from app.sheets import SheetsClient
 from app.telegram import TelegramClient
 
 app = FastAPI(title="Family Budget Telegram Bot")
+logger = logging.getLogger(__name__)
 
 
 def get_processor(settings: Settings = Depends(get_settings)) -> BudgetProcessor:
@@ -168,7 +171,10 @@ def report_request_period(text: str) -> str | None:
 
 async def send_to_recipients(telegram: TelegramClient, processor: BudgetProcessor, text: str) -> None:
     for chat_id in processor.recipient_chat_ids():
-        await telegram.send_message(chat_id, text)
+        try:
+            await telegram.send_message(chat_id, text)
+        except Exception as exc:
+            logger.warning("Failed to send Telegram message to recipient %s: %s", chat_id, exc)
 
 
 async def parse_message(
