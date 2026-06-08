@@ -27,6 +27,9 @@ budget - показать текущий бюджет и баланс
 week - показать отчет за текущую неделю
 month - показать отчет за текущий месяц
 limits - показать активные лимиты и алерты
+limit - установить лимит на категорию
+delete_limit - отключить лимит категории
+alert - установить алерт по балансу
 ```
 
 The same budget summary also works with plain messages like `покажи текущий бюджет`, `покажи баланс`, or `поточний бюджет`.
@@ -42,6 +45,12 @@ Useful commands:
 /delete_limit продукты
 /alert balance below 10000 PLN
 ```
+
+## Git Workflow
+
+`main` is the canonical branch. GitHub Actions deploys Cloud Run only from `main`, and scheduled digests also run from the default branch.
+
+`master` was used during the initial setup and is no longer a working branch. Keep new commits on `main`; the old branch can be removed from GitHub after confirming nothing still points to it.
 
 ## What I Need From You
 

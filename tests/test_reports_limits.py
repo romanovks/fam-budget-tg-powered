@@ -20,6 +20,7 @@ class FakeSheetsClient:
         ]
         self.created_limits = []
         self.alert_keys = []
+        self.deactivated_rows = []
 
     def read_transactions(self):
         return self.transactions
@@ -35,6 +36,9 @@ class FakeSheetsClient:
 
     def update_limit_alert_key(self, row_number, alert_key):
         self.alert_keys.append((row_number, alert_key))
+
+    def deactivate_limit(self, row_number):
+        self.deactivated_rows.append(row_number)
 
 
 def make_processor(fake_sheets: FakeSheetsClient) -> BudgetProcessor:
@@ -82,3 +86,25 @@ def test_limit_alert_fires_once_when_threshold_is_reached() -> None:
     assert len(alerts) == 1
     assert "Лимит достигнут: Groceries" in alerts[0]
     assert fake_sheets.alert_keys[0][0] == 2
+
+
+def test_balance_alert_command_creates_shared_alert() -> None:
+    fake_sheets = FakeSheetsClient()
+    processor = make_processor(fake_sheets)
+
+    response = processor.handle_limit_text("/alert balance below 10000 PLN", Person.SVITLANA)
+
+    assert "Балансовый алерт установлен" in response
+    assert fake_sheets.created_limits[0]["scope"] == "Balance"
+    assert fake_sheets.created_limits[0]["recipients"] == "Both"
+    assert fake_sheets.created_limits[0]["amount_pln"] == 10000.0
+
+
+def test_delete_limit_deactivates_matching_category_limit() -> None:
+    fake_sheets = FakeSheetsClient()
+    processor = make_processor(fake_sheets)
+
+    response = processor.handle_limit_text("/delete_limit продукты", Person.KONSTANTIN)
+
+    assert response == "Лимит Groceries отключен."
+    assert fake_sheets.deactivated_rows == [2]
