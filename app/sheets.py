@@ -14,8 +14,8 @@ from app.models import NormalizedTransaction, ParseResult, Person
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 LIMITS_SHEET = "Limits"
-WEEKLY_REPORTS_SHEET = "Weekly Reports"
-MONTHLY_REPORTS_SHEET = "Monthly Reports"
+WEEKLY_SUMMARY_SHEET = "Weekly Summary"
+MONTHLY_SUMMARY_SHEET = "Monthly Summary"
 LIMITS_HEADERS = [
     "Limit ID",
     "Scope",
@@ -30,19 +30,6 @@ LIMITS_HEADERS = [
     "Created At",
     "Last Alert Key",
     "Description",
-]
-REPORT_HEADERS = [
-    "Generated At",
-    "Period",
-    "Start Date",
-    "End Date",
-    "Total Expenses PLN",
-    "Total Income PLN",
-    "Net PLN",
-    "Current Balance PLN",
-    "Top Categories",
-    "Limits",
-    "Digest",
 ]
 
 
@@ -251,40 +238,118 @@ class SheetsClient:
         limit_lines: list[str],
         report_text: str,
     ) -> None:
-        sheet_name = WEEKLY_REPORTS_SHEET if period == "Weekly" else MONTHLY_REPORTS_SHEET
-        self._ensure_sheet(sheet_name, REPORT_HEADERS)
         generated_at = datetime.now(ZoneInfo(self._timezone)).strftime("%Y-%m-%d %H:%M:%S %Z")
-        row = [
-            generated_at,
-            title,
-            start.isoformat(),
-            end.isoformat(),
-            round(total_expenses, 2),
-            round(total_income, 2),
-            round(total_income - total_expenses, 2),
-            current_balance,
-            "\n".join(f"{category}: {amount:,.2f} PLN" for category, amount in top_categories),
-            "\n".join(limit_lines),
-            report_text,
-        ]
+        if period == "Weekly":
+            self._upsert_weekly_summary_report(
+                start=start,
+                end=end,
+                total_expenses=total_expenses,
+                total_income=total_income,
+                top_categories=top_categories,
+                limit_lines=limit_lines,
+                report_text=report_text,
+                generated_at=generated_at,
+            )
+            return
+        self._upsert_monthly_summary_report(
+            start=start,
+            total_expenses=total_expenses,
+            total_income=total_income,
+            top_categories=top_categories,
+            limit_lines=limit_lines,
+            report_text=report_text,
+            generated_at=generated_at,
+        )
+
+    def _upsert_weekly_summary_report(
+        self,
+        *,
+        start: date,
+        end: date,
+        total_expenses: float,
+        total_income: float,
+        top_categories: list[tuple[str, float]],
+        limit_lines: list[str],
+        report_text: str,
+        generated_at: str,
+    ) -> None:
         values = (
             self._service.spreadsheets()
             .values()
-            .get(spreadsheetId=self._spreadsheet_id, range=f"{sheet_name}!A:K")
+            .get(spreadsheetId=self._spreadsheet_id, range=f"{WEEKLY_SUMMARY_SHEET}!A:K")
             .execute()
             .get("values", [])
         )
         target_row = None
         for index, existing in enumerate(values[1:], start=2):
-            existing_start = existing[2] if len(existing) > 2 else ""
-            existing_end = existing[3] if len(existing) > 3 else ""
+            existing_start = existing[0] if len(existing) > 0 else ""
+            existing_end = existing[1] if len(existing) > 1 else ""
             if existing_start == start.isoformat() and existing_end == end.isoformat():
                 target_row = index
                 break
+        summary = _compact_report_summary(total_income, total_expenses, top_categories)
+        recommendation = _report_recommendation(top_categories, limit_lines)
         if target_row:
-            self._update_values(f"{sheet_name}!A{target_row}:K{target_row}", [row])
+            self._update_values(f"{WEEKLY_SUMMARY_SHEET}!I{target_row}:K{target_row}", [[summary, recommendation, generated_at]])
         else:
-            self._append_values(f"{sheet_name}!A:K", [row])
+            top_category = top_categories[0][0] if top_categories else ""
+            row = [
+                start.isoformat(),
+                end.isoformat(),
+                round(total_income, 2),
+                round(total_expenses, 2),
+                round(total_income - total_expenses, 2),
+                top_category,
+                "",
+                "",
+                summary,
+                recommendation,
+                generated_at,
+            ]
+            self._append_values(f"{WEEKLY_SUMMARY_SHEET}!A:K", [row])
+
+    def _upsert_monthly_summary_report(
+        self,
+        *,
+        start: date,
+        total_expenses: float,
+        total_income: float,
+        top_categories: list[tuple[str, float]],
+        limit_lines: list[str],
+        report_text: str,
+        generated_at: str,
+    ) -> None:
+        values = (
+            self._service.spreadsheets()
+            .values()
+            .get(spreadsheetId=self._spreadsheet_id, range=f"{MONTHLY_SUMMARY_SHEET}!A:J")
+            .execute()
+            .get("values", [])
+        )
+        target_row = None
+        for index, existing in enumerate(values[1:], start=2):
+            existing_month = existing[0] if existing else ""
+            if existing_month == start.isoformat():
+                target_row = index
+                break
+        notes = f"{generated_at}\n{report_text}"
+        if target_row:
+            self._update_values(f"{MONTHLY_SUMMARY_SHEET}!J{target_row}", [[notes]])
+        else:
+            top_category = top_categories[0][0] if top_categories else ""
+            row = [
+                start.isoformat(),
+                round(total_income, 2),
+                round(total_expenses, 2),
+                round(total_income - total_expenses, 2),
+                round((total_income - total_expenses) / total_income, 4) if total_income else 0,
+                "",
+                "",
+                "",
+                top_category,
+                notes,
+            ]
+            self._append_values(f"{MONTHLY_SUMMARY_SHEET}!A:J", [row])
 
     def update_digest_dashboard(
         self,
@@ -309,7 +374,7 @@ class SheetsClient:
             ["Top Category 2", _format_top_category(top_categories, 1)],
             ["Top Category 3", _format_top_category(top_categories, 2)],
         ]
-        self._update_values("Dashboard!D4:E13", rows)
+        self._update_values("Dashboard!G4:H13", rows)
 
     def ensure_limits_sheet(self) -> None:
         self._ensure_sheet(LIMITS_SHEET, LIMITS_HEADERS)
@@ -428,3 +493,17 @@ def _format_top_category(top_categories: list[tuple[str, float]], index: int) ->
         return ""
     category, amount = top_categories[index]
     return f"{category}: {amount:,.2f} PLN"
+
+
+def _compact_report_summary(total_income: float, total_expenses: float, top_categories: list[tuple[str, float]]) -> str:
+    top = _format_top_category(top_categories, 0) or "no expenses"
+    return f"Income {total_income:,.2f} PLN, expenses {total_expenses:,.2f} PLN. Top: {top}."
+
+
+def _report_recommendation(top_categories: list[tuple[str, float]], limit_lines: list[str]) -> str:
+    if limit_lines:
+        return "Check limits: " + "; ".join(limit_lines)
+    top = _format_top_category(top_categories, 0)
+    if top:
+        return f"Watch the largest category: {top}."
+    return "No spending pressure in this period."
